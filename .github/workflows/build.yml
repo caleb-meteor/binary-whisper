@@ -46,12 +46,13 @@ jobs:
           choco install zip -y
 
       # 4️⃣ Clone whisper.cpp（如果不是子模块）
-      - name: Clone whisper.cpp
-        shell: bash
-        run: |
-          if [ ! -d "whisper.cpp" ]; then
-            git clone --recurse-submodules https://github.com/ggerganov/whisper.cpp.git
-          fi
+      - name: Checkout whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggerganov/whisper.cpp
+          path: whisper.cpp
+          submodules: recursive
+          fetch-depth: 0
 
       # 5️⃣ 编译
       - name: Build whisper.cpp
