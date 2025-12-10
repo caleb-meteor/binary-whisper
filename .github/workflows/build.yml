@@ -62,9 +62,9 @@ jobs:
           cd whisper.cpp/build
           zip -r ../whisper-${{ runner.os }}-${{ matrix.arch }}.zip *
 
-      # 6️⃣ 上传 artifact
+      # 6️⃣ 上传 artifact（v4）
       - name: Upload zip
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: whisper-${{ runner.os }}-${{ matrix.arch }}
           path: whisper.cpp/build/whisper-${{ runner.os }}-${{ matrix.arch }}.zip
