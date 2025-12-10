@@ -47,6 +47,7 @@ jobs:
 
       # 4️⃣ Clone whisper.cpp（如果不是子模块）
       - name: Clone whisper.cpp
+        shell: bash
         run: |
           if [ ! -d "whisper.cpp" ]; then
             git clone --recurse-submodules https://github.com/ggerganov/whisper.cpp.git
