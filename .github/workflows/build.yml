@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-13
+          - os: macos-15-intel
             arch: x86_64
           - os: macos-latest
             arch: arm64
@@ -73,7 +73,8 @@ jobs:
         shell: bash
         run: |
           cd whisper.cpp/build
-          zip -r ../whisper-${{ runner.os }}-${{ matrix.arch }}.zip *
+           zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip .
+           ls -lh whisper-*.zip
 
       # 7️⃣ 上传 artifact
       - name: Upload zip
