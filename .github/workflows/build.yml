@@ -4,7 +4,12 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -36,7 +41,8 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-          choco install visualstudio2019buildtools visualstudio2019-workload-vctools -y
+          # Visual Studio Build Tools 已预装在 GitHub-hosted runners 上，直接使用即可。
+          # 使用 choco 安装 visualstudio build tools 很慢且容易卡住，故在 CI 中移除该步骤。
           choco install zip -y
 
       # 4️⃣ Clone whisper.cpp（如果不是子模块）
@@ -82,3 +88,44 @@ jobs:
         with:
           name: whisper-${{ runner.os }}-${{ matrix.arch }}
           path: whisper.cpp/build/whisper-${{ runner.os }}-${{ matrix.arch }}.zip
+
+  # 8️⃣ 发布到 GitHub Releases（仅在推送 tag 时触发）
+  publish_release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./dist
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: 'Automated release created by CI'
+          draft: false
+          prerelease: false
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          for f in dist/*.zip; do
+            [ -f "$f" ] || { echo "No artifacts found to upload"; exit 1; }
+            filename=$(basename "$f")
+            echo "Uploading $filename"
+            # upload_url contains a template like: https://uploads.github.com/repos/:owner/:repo/releases/:id/assets{?name,label}
+            upload_url="${{ steps.create_release.outputs.upload_url }}"
+            # Strip the template part if present
+            upload_url="${upload_url%%\{*}"
+            curl -s -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/zip" \
+              --data-binary @"$f" \
+              "$upload_url?name=$filename"
+          done
