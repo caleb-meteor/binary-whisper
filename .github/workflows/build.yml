@@ -55,8 +55,13 @@ jobs:
           cd build
           # macOS 编译
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            # 不指定具体 CPU，避免 apple-m3 错误
-            cmake .. -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release
+            if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+              # Apple Silicon (M系列)
+              cmake .. -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON
+            else
+              # Intel x86_64
+              cmake .. -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_BUILD_TYPE=Release
+            fi
           else
             # Windows x64 编译
             cmake .. -DCMAKE_BUILD_TYPE=Release
