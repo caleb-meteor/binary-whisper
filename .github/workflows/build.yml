@@ -24,26 +24,29 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2️⃣ 安装依赖
-      - name: Install dependencies
+      # 2️⃣ 安装依赖 macOS
+      - name: Install dependencies on macOS
+        if: runner.os == 'macOS'
         run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            brew update
-            brew install cmake zip
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-            choco install visualstudio2019buildtools visualstudio2019-workload-vctools -y
-            choco install zip -y
-          fi
+          brew update
+          brew install cmake zip
 
-      # 3️⃣ Clone whisper.cpp（如果不是子模块）
+      # 3️⃣ 安装依赖 Windows
+      - name: Install dependencies on Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          choco install visualstudio2019buildtools visualstudio2019-workload-vctools -y
+          choco install zip -y
+
+      # 4️⃣ Clone whisper.cpp（如果不是子模块）
       - name: Clone whisper.cpp
         run: |
           if [ ! -d "whisper.cpp" ]; then
             git clone --recurse-submodules https://github.com/ggerganov/whisper.cpp.git
           fi
 
-      # 4️⃣ 编译
+      # 5️⃣ 编译
       - name: Build whisper.cpp
         run: |
           cd whisper.cpp
@@ -55,14 +58,15 @@ jobs:
             cmake .. -DCMAKE_BUILD_TYPE=Release
           fi
           cmake --build . --config Release
+        shell: bash  # 确保在 Windows 上也用 Bash 执行
 
-      # 5️⃣ 打包成 zip
+      # 6️⃣ 打包成 zip
       - name: Package artifact
         run: |
           cd whisper.cpp/build
           zip -r ../whisper-${{ runner.os }}-${{ matrix.arch }}.zip *
 
-      # 6️⃣ 上传 artifact（v4）
+      # 7️⃣ 上传 artifact
       - name: Upload zip
         uses: actions/upload-artifact@v4
         with:
