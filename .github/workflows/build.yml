@@ -1,4 +1,4 @@
-name: Build whisper.cpp (Static CLI)
+name: Build whisper.cpp Static CLI
 
 on:
   push:
@@ -25,10 +25,11 @@ jobs:
             arch: x64
 
     steps:
-      # 1️⃣ Checkout whisper.cpp
+      # 1️⃣ Checkout main repo
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      # 2️⃣ Checkout whisper.cpp
       - name: Checkout whisper.cpp
         uses: actions/checkout@v4
         with:
@@ -37,7 +38,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # 2️⃣ 安装依赖
+      # 3️⃣ Install dependencies
       - name: Install dependencies on macOS
         if: runner.os == 'macOS'
         run: |
@@ -50,8 +51,8 @@ jobs:
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install zip -y
 
-      # 3️⃣ 构建静态 whisper-cli
-      - name: Build whisper-cli (Static)
+      # 4️⃣ Build whisper-cli (Static)
+      - name: Build whisper-cli
         run: |
           mkdir -p whisper.cpp/build
           cd whisper.cpp/build
@@ -61,26 +62,30 @@ jobs:
             else
               cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
             fi
+            cmake --build . --config Release --target whisper-cli
           else
             cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+            cmake --build . --config Release --target whisper-cli
           fi
-          cmake --build . --config Release --target whisper-cli
 
-      # 4️⃣ 打包成 zip
-      - name: Package artifact
+      # 5️⃣ Package whisper-cli
+      - name: Package whisper-cli
         run: |
           cd whisper.cpp/build
-          zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip whisper-cli
+          # 查找可执行文件 (macOS / Windows)
+          CLI=$(find . -type f -name "whisper-cli*" | head -n 1)
+          echo "Found executable: $CLI"
+          zip -j whisper-${{ runner.os }}-${{ matrix.arch }}.zip "$CLI"
           ls -lh whisper-*.zip
 
-      # 5️⃣ 上传 artifact
+      # 6️⃣ Upload artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: whisper-${{ runner.os }}-${{ matrix.arch }}
           path: whisper.cpp/build/whisper-${{ runner.os }}-${{ matrix.arch }}.zip
 
-  # 发布到 GitHub Releases（仅在 push tag 时触发）
+  # 7️⃣ Publish to GitHub Release (on tag push)
   publish_release:
     needs: build
     runs-on: ubuntu-latest
