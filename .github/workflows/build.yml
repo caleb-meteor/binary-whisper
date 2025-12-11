@@ -50,6 +50,7 @@ jobs:
 
       # 4️⃣ Build whisper-cli (Static)
       - name: Build whisper-cli
+        shell: bash
         run: |
           mkdir -p whisper.cpp/build
           cd whisper.cpp/build
