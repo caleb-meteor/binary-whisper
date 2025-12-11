@@ -68,6 +68,7 @@ jobs:
 
       # 5️⃣ Package whisper-cli
       - name: Package whisper-cli
+        shell: bash
         run: |
           cd whisper.cpp/build
           # 查找可执行文件 (macOS / Windows)
