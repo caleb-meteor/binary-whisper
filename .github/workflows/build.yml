@@ -2,11 +2,8 @@ name: Build whisper.cpp Static CLI
 
 on:
   push:
-    branches:
-      - main
     tags:
-      - 'v*'
-  pull_request:
+      - 'v*'   # 只有 push 标签以 v 开头时触发，例如 v1.0.0
 
 permissions:
   contents: write
@@ -85,11 +82,10 @@ jobs:
           name: whisper-${{ runner.os }}-${{ matrix.arch }}
           path: whisper.cpp/build/whisper-${{ runner.os }}-${{ matrix.arch }}.zip
 
-  # 7️⃣ Publish to GitHub Release (on tag push)
+  # 7️⃣ Publish to GitHub Release
   publish_release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
