@@ -1,4 +1,4 @@
-name: Build whisper.cpp
+name: Build whisper.cpp (Static CLI)
 
 on:
   push:
@@ -18,32 +18,17 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            arch: x86_64
-          - os: macos-latest
             arch: arm64
+          - os: macos-latest
+            arch: x86_64
           - os: windows-latest
             arch: x64
 
     steps:
-      # 1️⃣ Checkout 仓库
+      # 1️⃣ Checkout whisper.cpp
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2️⃣ 安装依赖 macOS
-      - name: Install dependencies on macOS
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install cmake zip
-
-      # 3️⃣ 安装依赖 Windows
-      - name: Install dependencies on Windows
-        if: runner.os == 'Windows'
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-          choco install zip -y
-
-      # 4️⃣ Clone whisper.cpp
       - name: Checkout whisper.cpp
         uses: actions/checkout@v4
         with:
@@ -52,47 +37,57 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # 5️⃣ 编译静态 whisper-cli
-      - name: Build whisper.cpp (static)
-        shell: bash
+      # 2️⃣ 安装依赖
+      - name: Install dependencies on macOS
+        if: runner.os == 'macOS'
         run: |
-          cd whisper.cpp
-          mkdir -p build
-          cd build
+          brew update
+          brew install cmake zip
+
+      - name: Install dependencies on Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          choco install zip -y
+
+      # 3️⃣ 构建静态 whisper-cli
+      - name: Build whisper-cli (Static)
+        run: |
+          mkdir -p whisper.cpp/build
+          cd whisper.cpp/build
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             if [[ "${{ matrix.arch }}" == "arm64" ]]; then
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DSTATIC_LIB=ON
+              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON
             else
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DSTATIC_LIB=ON
+              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
             fi
           else
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DSTATIC_LIB=ON
+            cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
           fi
-          cmake --build . --config Release
+          cmake --build . --config Release --target whisper-cli
 
-      # 6️⃣ 打包成 zip
+      # 4️⃣ 打包成 zip
       - name: Package artifact
-        shell: bash
         run: |
           cd whisper.cpp/build
-          zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip .
+          zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip whisper-cli
           ls -lh whisper-*.zip
 
-      # 7️⃣ 上传 artifact
-      - name: Upload zip
+      # 5️⃣ 上传 artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: whisper-${{ runner.os }}-${{ matrix.arch }}
           path: whisper.cpp/build/whisper-${{ runner.os }}-${{ matrix.arch }}.zip
 
-  # 8️⃣ 发布到 GitHub Release（仅在推送 tag 时触发）
+  # 发布到 GitHub Releases（仅在 push tag 时触发）
   publish_release:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: ./dist
 
@@ -102,7 +97,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           release_name: Release ${{ github.ref_name }}
-          body: 'Automated release created by CI'
+          body: 'Automated static whisper-cli release'
           draft: false
           prerelease: false
 
@@ -110,7 +105,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
           for f in dist/*.zip; do
             [ -f "$f" ] || { echo "No artifacts found to upload"; exit 1; }
             filename=$(basename "$f")
