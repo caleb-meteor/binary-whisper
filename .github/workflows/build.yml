@@ -103,6 +103,7 @@ jobs:
           body: 'Automated static whisper-cli release'
           draft: false
           prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}   # ✅ 必须加
 
       - name: Upload release assets
         env:
