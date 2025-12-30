@@ -1,4 +1,4 @@
-name: Build whisper.cpp Static CLI
+name: Build whisper.cpp Static Binaries
 
 on:
   push:
@@ -48,8 +48,8 @@ jobs:
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install zip -y
 
-      # 4️⃣ Build whisper-cli (Static)
-      - name: Build whisper-cli
+      # 4️⃣ Build all whisper.cpp targets (Static)
+      - name: Build whisper.cpp
         shell: bash
         run: |
           mkdir -p whisper.cpp/build
@@ -60,21 +60,29 @@ jobs:
             else
               cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
             fi
-            cmake --build . --config Release --target whisper-cli
+            cmake --build . --config Release
           else
             cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
-            cmake --build . --config Release --target whisper-cli
+            cmake --build . --config Release
           fi
 
-      # 5️⃣ Package whisper-cli
-      - name: Package whisper-cli
+      # 5️⃣ Package all build artifacts
+      - name: Package all build artifacts
         shell: bash
         run: |
           cd whisper.cpp/build
-          # 查找可执行文件 (macOS / Windows)
-          CLI=$(find . -type f -name "whisper-cli*" | head -n 1)
-          echo "Found executable: $CLI"
-          zip -j whisper-${{ runner.os }}-${{ matrix.arch }}.zip "$CLI"
+          # 直接打包整个构建目录的所有相关文件，保持目录结构
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
+              -i "whisper-*" "*.a" "*.dylib" \
+              -x "*.o" "*.cmake" "CMakeFiles/*" "*.cmake" "Makefile" "cmake_install.cmake"
+          else
+            zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
+              -i "whisper-*.exe" "*.lib" "*.dll" \
+              -x "*.obj" "*.pdb" "CMakeFiles/*" "*.cmake" "*.vcxproj*" "*.sln"
+          fi
+          echo "Package contents:"
+          unzip -l whisper-${{ runner.os }}-${{ matrix.arch }}.zip | head -20
           ls -lh whisper-*.zip
 
       # 6️⃣ Upload artifact
@@ -103,6 +111,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dist/*.zip
-          body: 'Automated static whisper-cli release'
+          body: 'Automated static whisper.cpp binaries release'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
