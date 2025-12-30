@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 120  # 设置 job 超时时间为 2 小时
     strategy:
       matrix:
         include:
@@ -50,6 +51,7 @@ jobs:
 
       # 4️⃣ Build all whisper.cpp targets (Static)
       - name: Build whisper.cpp
+        timeout-minutes: 90  # 构建步骤超时 90 分钟
         shell: bash
         run: |
           mkdir -p whisper.cpp/build
@@ -60,10 +62,12 @@ jobs:
             else
               cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
             fi
-            cmake --build . --config Release
+            # 使用并行构建加速编译
+            cmake --build . --config Release -j$(sysctl -n hw.ncpu)
           else
             cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
-            cmake --build . --config Release
+            # Windows 使用 /m 参数启用多核编译
+            cmake --build . --config Release --parallel
           fi
 
       # 5️⃣ Package all build artifacts
