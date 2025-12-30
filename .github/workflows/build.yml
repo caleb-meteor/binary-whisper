@@ -75,33 +75,18 @@ jobs:
         shell: bash
         run: |
           cd whisper.cpp/build
-          # 先列出所有构建产物
-          echo "=== Build artifacts ==="
+          # 直接打包整个构建目录，排除中间文件和 CMake 生成文件
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            echo "Executables:"
-            find . -type f -name "whisper-*" -executable 2>/dev/null | head -20
-            echo "Libraries:"
-            find . -type f \( -name "*.a" -o -name "*.dylib" \) 2>/dev/null | head -20
+            zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
+              -x "*.o" "*.cmake" "CMakeFiles/*" "Makefile" "cmake_install.cmake" \
+              -x "*.log" "*.tmp" "*.cache" "*.swp" "*~"
           else
-            echo "Executables:"
-            find . -type f -name "*.exe" 2>/dev/null | head -20
-            echo "Libraries:"
-            find . -type f \( -name "*.lib" -o -name "*.dll" \) 2>/dev/null | head -20
+            zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
+              -x "*.obj" "*.pdb" "CMakeFiles/*" "*.cmake" "*.vcxproj*" "*.sln" \
+              -x "*.log" "*.tmp" "*.cache" "*.swp" "*~" "*.user" "*.suo"
           fi
-          
-          # 打包所有可执行文件和库文件，保持目录结构
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            # macOS: 打包所有 whisper-* 可执行文件和库文件
-            find . -type f \( -name "whisper-*" -executable -o -name "*.a" -o -name "*.dylib" \) ! -path "*/CMakeFiles/*" ! -name "*.o" | \
-              zip -@ whisper-${{ runner.os }}-${{ matrix.arch }}.zip
-          else
-            # Windows: 打包所有 .exe 和库文件
-            find . -type f \( -name "*.exe" -o -name "*.lib" -o -name "*.dll" \) ! -path "*/CMakeFiles/*" ! -name "*.obj" ! -name "*.pdb" | \
-              zip -@ whisper-${{ runner.os }}-${{ matrix.arch }}.zip
-          fi
-          
           echo "=== Package contents ==="
-          unzip -l whisper-${{ runner.os }}-${{ matrix.arch }}.zip
+          unzip -l whisper-${{ runner.os }}-${{ matrix.arch }}.zip | head -50
           ls -lh whisper-*.zip
 
       # 6️⃣ Upload artifact
