@@ -86,7 +86,9 @@ jobs:
               -x "*.log" "*.tmp" "*.cache" "*.swp" "*~" "*.user" "*.suo"
           fi
           echo "=== Package contents ==="
-          unzip -l whisper-${{ runner.os }}-${{ matrix.arch }}.zip | head -50
+          unzip -l whisper-${{ runner.os }}-${{ matrix.arch }}.zip | head -50 || true
+          echo ""
+          echo "=== Package size ==="
           ls -lh whisper-*.zip
 
       # 6️⃣ Upload artifact
