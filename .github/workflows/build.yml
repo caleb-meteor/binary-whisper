@@ -41,13 +41,28 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake zip
+          brew install cmake zip openblas
 
       - name: Install dependencies on Windows
         if: runner.os == 'Windows'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install zip -y
+      
+      - name: Install OpenBLAS on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # 使用 vcpkg 安装 OpenBLAS
+          if (-not (Test-Path "C:\vcpkg")) {
+            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          }
+          & C:\vcpkg\bootstrap-vcpkg.bat
+          & C:\vcpkg\vcpkg.exe install openblas:x64-windows-static
+          # 设置环境变量以便 CMake 能找到 OpenBLAS
+          $vcpkgRoot = "C:\vcpkg"
+          Write-Host "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "CMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # 4️⃣ Build all whisper.cpp targets (Static)
       - name: Build whisper.cpp
@@ -58,15 +73,31 @@ jobs:
           cd whisper.cpp/build
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             if [[ "${{ matrix.arch }}" == "arm64" ]]; then
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON
+              # macOS ARM64: 使用 Metal + OpenBLAS
+              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_BLAS=ON
             else
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+              # macOS Intel: 使用 OpenBLAS 加速 CPU
+              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_BLAS=ON
             fi
             # 使用并行构建加速编译
             cmake --build . --config Release -j$(sysctl -n hw.ncpu)
           else
-            cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
-            # Windows 使用 /m 参数启用多核编译
+            # Windows: 使用 OpenBLAS 加速 CPU
+            # 如果设置了 VCPKG_ROOT，使用 vcpkg 工具链
+            if [[ -n "$VCPKG_ROOT" ]]; then
+              cmake .. -G "Visual Studio 17 2022" -A x64 \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DBUILD_SHARED_LIBS=OFF \
+                -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+                -DGGML_BLAS=ON
+            else
+              # 尝试让 CMake 自动检测 OpenBLAS
+              cmake .. -G "Visual Studio 17 2022" -A x64 \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DBUILD_SHARED_LIBS=OFF \
+                -DGGML_BLAS=ON
+            fi
+            # Windows 使用 --parallel 参数启用多核编译
             cmake --build . --config Release --parallel
           fi
 
