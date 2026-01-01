@@ -37,110 +37,74 @@ jobs:
           fetch-depth: 0
 
       # 3️⃣ Install dependencies
-      - name: Install dependencies on macOS
-        if: runner.os == 'macOS'
+      - name: Install dependencies
         run: |
-          brew update
-          brew install cmake zip openblas
-
-      - name: Install dependencies on Windows
-        if: runner.os == 'Windows'
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-          choco install zip -y
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            brew update
+            brew install cmake zip openblas
+          else
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y zip -y
+          fi
       
       - name: Install OpenBLAS on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # 下载预编译的 OpenBLAS (使用 xianyi/OpenBLAS 的预编译版本)
           $openblasDir = "C:\openblas"
-          $openblasUrl = "https://github.com/xianyi/OpenBLAS/releases/download/v0.3.26/OpenBLAS-0.3.26-x64.zip"
-          
           if (-not (Test-Path $openblasDir)) {
+            $release = Invoke-RestMethod "https://api.github.com/repos/OpenMathLib/OpenBLAS/releases/latest"
+            $version = ($release.tag_name) -replace '^v', ''
+            $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/$($release.tag_name)/OpenBLAS-$version-x64.zip"
+            
             New-Item -ItemType Directory -Path $openblasDir -Force | Out-Null
-            Write-Host "Downloading OpenBLAS from $openblasUrl"
-            Invoke-WebRequest -Uri $openblasUrl -OutFile "$openblasDir\openblas.zip"
+            Invoke-WebRequest -Uri $url -OutFile "$openblasDir\openblas.zip"
             Expand-Archive -Path "$openblasDir\openblas.zip" -DestinationPath $openblasDir -Force
             
-            # 查找解压后的目录
-            $extractedDir = Get-ChildItem -Path $openblasDir -Directory | Where-Object { $_.Name -like "OpenBLAS*" } | Select-Object -First 1
-            if ($extractedDir) {
-              # 移动到根目录
-              Get-ChildItem -Path $extractedDir.FullName | Move-Item -Destination $openblasDir -Force
-              Remove-Item -Path $extractedDir.FullName -Force
+            $extracted = Get-ChildItem -Path $openblasDir -Directory | Where-Object { $_.Name -like "*OpenBLAS*" } | Select-Object -First 1
+            if ($extracted) {
+              Get-ChildItem -Path $extracted.FullName | Move-Item -Destination $openblasDir -Force
+              Remove-Item -Path $extracted.FullName -Force
             }
+            Remove-Item -Path "$openblasDir\openblas.zip" -Force -ErrorAction SilentlyContinue
           }
           
-          # 设置环境变量以便 CMake 能找到 OpenBLAS
-          Write-Host "OpenBLAS_DIR=$openblasDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "OpenBLAS_INCLUDE_DIR=$openblasDir\include" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | 
+            Where-Object { $_.Name -match "openblas\.lib$" } | Select-Object -First 1
           
-          # 查找库文件
-          $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | Select-Object -First 1
-          if ($libFile) {
-            Write-Host "OpenBLAS_LIB=$($libFile.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "Found OpenBLAS library at: $($libFile.FullName)"
-          }
-          
-          # 添加到 PATH
-          $binPath = Get-ChildItem -Path $openblasDir -Recurse -Directory -Filter "bin" | Select-Object -First 1
-          if ($binPath) {
-            $env:PATH = "$($binPath.FullName);$env:PATH"
-            Write-Host "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
+          @(
+            "OpenBLAS_DIR=$openblasDir",
+            "BLAS_LIBRARIES=$($libFile.FullName)",
+            "BLAS_INCLUDE_DIRS=$openblasDir\include"
+          ) | ForEach-Object { Write-Host $_ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
 
-      # 4️⃣ Build all whisper.cpp targets (Static)
+      # 4️⃣ Build whisper.cpp
       - name: Build whisper.cpp
-        timeout-minutes: 90  # 构建步骤超时 90 分钟
+        timeout-minutes: 90
         shell: bash
         run: |
-          mkdir -p whisper.cpp/build
-          cd whisper.cpp/build
+          mkdir -p whisper.cpp/build && cd whisper.cpp/build
+          
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            if [[ "${{ matrix.arch }}" == "arm64" ]]; then
-              # macOS ARM64: 使用 Metal + OpenBLAS
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_BLAS=ON
-            else
-              # macOS Intel: 使用 OpenBLAS 加速 CPU
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_BLAS=ON
-            fi
-            # 使用并行构建加速编译
+            [[ "${{ matrix.arch }}" == "arm64" ]] && METAL="-DGGML_METAL=ON" || METAL=""
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_BLAS=ON $METAL
             cmake --build . --config Release -j$(sysctl -n hw.ncpu)
           else
-            # Windows: 使用 OpenBLAS 加速 CPU
-            # 使用预编译的 OpenBLAS，设置正确的路径
             cmakeArgs=(
-              -G "Visual Studio 17 2022"
-              -A x64
-              -DCMAKE_BUILD_TYPE=Release
-              -DBUILD_SHARED_LIBS=OFF
-              -DGGML_BLAS=ON
-              -DGGML_BLAS_VENDOR=OpenBLAS
+              -G "Visual Studio 17 2022" -A x64
+              -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+              -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLA_VENDOR=OpenBLAS
             )
-            
-            # 如果设置了 OpenBLAS 路径，添加到 CMake 参数
-            if [[ -n "$OpenBLAS_DIR" ]]; then
-              cmakeArgs+=(-DOpenBLAS_DIR="$OpenBLAS_DIR")
-            fi
-            if [[ -n "$OpenBLAS_INCLUDE_DIR" ]]; then
-              cmakeArgs+=(-DOpenBLAS_INCLUDE_DIR="$OpenBLAS_INCLUDE_DIR")
-            fi
-            if [[ -n "$OpenBLAS_LIB" ]]; then
-              cmakeArgs+=(-DOpenBLAS_LIB="$OpenBLAS_LIB")
-            fi
-            
+            [[ -n "$BLAS_LIBRARIES" ]] && cmakeArgs+=(-DBLAS_LIBRARIES="$BLAS_LIBRARIES")
+            [[ -n "$BLAS_INCLUDE_DIRS" ]] && cmakeArgs+=(-DBLAS_INCLUDE_DIRS="$BLAS_INCLUDE_DIRS")
             cmake .. "${cmakeArgs[@]}"
-            # Windows 使用 --parallel 参数启用多核编译
             cmake --build . --config Release --parallel
           fi
 
-      # 5️⃣ Package all build artifacts
-      - name: Package all build artifacts
+      # 5️⃣ Package artifacts
+      - name: Package artifacts
         shell: bash
         run: |
           cd whisper.cpp/build
-          # 直接打包整个构建目录，排除中间文件和 CMake 生成文件
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
               -x "*.o" "*.cmake" "CMakeFiles/*" "Makefile" "cmake_install.cmake" \
@@ -150,10 +114,6 @@ jobs:
               -x "*.obj" "*.pdb" "CMakeFiles/*" "*.cmake" "*.vcxproj*" "*.sln" \
               -x "*.log" "*.tmp" "*.cache" "*.swp" "*~" "*.user" "*.suo"
           fi
-          echo "=== Package contents ==="
-          unzip -l whisper-${{ runner.os }}-${{ matrix.arch }}.zip | head -50 || true
-          echo ""
-          echo "=== Package size ==="
           ls -lh whisper-*.zip
 
       # 6️⃣ Upload artifact
@@ -163,21 +123,18 @@ jobs:
           name: whisper-${{ runner.os }}-${{ matrix.arch }}
           path: whisper.cpp/build/whisper-${{ runner.os }}-${{ matrix.arch }}.zip
 
-  # 7️⃣ Publish to GitHub Release
+  # 7️⃣ Publish Release
   publish_release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./dist
           merge-multiple: true
 
-      - name: Display structure of downloaded files
-        run: ls -R ./dist
-
-      - name: Create and Upload Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
