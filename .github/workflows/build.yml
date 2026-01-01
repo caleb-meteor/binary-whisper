@@ -53,16 +53,42 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # 使用 vcpkg 安装 OpenBLAS
-          if (-not (Test-Path "C:\vcpkg")) {
-            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          # 下载预编译的 OpenBLAS (使用 xianyi/OpenBLAS 的预编译版本)
+          $openblasDir = "C:\openblas"
+          $openblasUrl = "https://github.com/xianyi/OpenBLAS/releases/download/v0.3.26/OpenBLAS-0.3.26-x64.zip"
+          
+          if (-not (Test-Path $openblasDir)) {
+            New-Item -ItemType Directory -Path $openblasDir -Force | Out-Null
+            Write-Host "Downloading OpenBLAS from $openblasUrl"
+            Invoke-WebRequest -Uri $openblasUrl -OutFile "$openblasDir\openblas.zip"
+            Expand-Archive -Path "$openblasDir\openblas.zip" -DestinationPath $openblasDir -Force
+            
+            # 查找解压后的目录
+            $extractedDir = Get-ChildItem -Path $openblasDir -Directory | Where-Object { $_.Name -like "OpenBLAS*" } | Select-Object -First 1
+            if ($extractedDir) {
+              # 移动到根目录
+              Get-ChildItem -Path $extractedDir.FullName | Move-Item -Destination $openblasDir -Force
+              Remove-Item -Path $extractedDir.FullName -Force
+            }
           }
-          & C:\vcpkg\bootstrap-vcpkg.bat
-          & C:\vcpkg\vcpkg.exe install openblas:x64-windows-static
+          
           # 设置环境变量以便 CMake 能找到 OpenBLAS
-          $vcpkgRoot = "C:\vcpkg"
-          Write-Host "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "CMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "OpenBLAS_DIR=$openblasDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "OpenBLAS_INCLUDE_DIR=$openblasDir\include" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          
+          # 查找库文件
+          $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | Select-Object -First 1
+          if ($libFile) {
+            Write-Host "OpenBLAS_LIB=$($libFile.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Found OpenBLAS library at: $($libFile.FullName)"
+          }
+          
+          # 添加到 PATH
+          $binPath = Get-ChildItem -Path $openblasDir -Recurse -Directory -Filter "bin" | Select-Object -First 1
+          if ($binPath) {
+            $env:PATH = "$($binPath.FullName);$env:PATH"
+            Write-Host "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
 
       # 4️⃣ Build all whisper.cpp targets (Static)
       - name: Build whisper.cpp
@@ -83,20 +109,28 @@ jobs:
             cmake --build . --config Release -j$(sysctl -n hw.ncpu)
           else
             # Windows: 使用 OpenBLAS 加速 CPU
-            # 如果设置了 VCPKG_ROOT，使用 vcpkg 工具链
-            if [[ -n "$VCPKG_ROOT" ]]; then
-              cmake .. -G "Visual Studio 17 2022" -A x64 \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DBUILD_SHARED_LIBS=OFF \
-                -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-                -DGGML_BLAS=ON
-            else
-              # 尝试让 CMake 自动检测 OpenBLAS
-              cmake .. -G "Visual Studio 17 2022" -A x64 \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DBUILD_SHARED_LIBS=OFF \
-                -DGGML_BLAS=ON
+            # 使用预编译的 OpenBLAS，设置正确的路径
+            cmakeArgs=(
+              -G "Visual Studio 17 2022"
+              -A x64
+              -DCMAKE_BUILD_TYPE=Release
+              -DBUILD_SHARED_LIBS=OFF
+              -DGGML_BLAS=ON
+              -DGGML_BLAS_VENDOR=OpenBLAS
+            )
+            
+            # 如果设置了 OpenBLAS 路径，添加到 CMake 参数
+            if [[ -n "$OpenBLAS_DIR" ]]; then
+              cmakeArgs+=(-DOpenBLAS_DIR="$OpenBLAS_DIR")
             fi
+            if [[ -n "$OpenBLAS_INCLUDE_DIR" ]]; then
+              cmakeArgs+=(-DOpenBLAS_INCLUDE_DIR="$OpenBLAS_INCLUDE_DIR")
+            fi
+            if [[ -n "$OpenBLAS_LIB" ]]; then
+              cmakeArgs+=(-DOpenBLAS_LIB="$OpenBLAS_LIB")
+            fi
+            
+            cmake .. "${cmakeArgs[@]}"
             # Windows 使用 --parallel 参数启用多核编译
             cmake --build . --config Release --parallel
           fi
