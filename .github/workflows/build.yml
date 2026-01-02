@@ -58,26 +58,60 @@ jobs:
             $version = ($release.tag_name) -replace '^v', ''
             $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/$($release.tag_name)/OpenBLAS-$version-x64.zip"
             
-            New-Item -ItemType Directory -Path $openblasDir -Force | Out-Null
-            Invoke-WebRequest -Uri $url -OutFile "$openblasDir\openblas.zip"
-            Expand-Archive -Path "$openblasDir\openblas.zip" -DestinationPath $openblasDir -Force
+            $tempDir = "C:\openblas_temp"
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            Write-Host "Downloading OpenBLAS $version from $url"
+            Invoke-WebRequest -Uri $url -OutFile "$tempDir\openblas.zip"
+            Expand-Archive -Path "$tempDir\openblas.zip" -DestinationPath $tempDir -Force
             
-            $extracted = Get-ChildItem -Path $openblasDir -Directory | Where-Object { $_.Name -like "*OpenBLAS*" } | Select-Object -First 1
+            # 查找解压后的 OpenBLAS-{version}-x64 目录
+            $extracted = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "OpenBLAS-*-x64" } | Select-Object -First 1
             if ($extracted) {
-              Get-ChildItem -Path $extracted.FullName | Move-Item -Destination $openblasDir -Force
-              Remove-Item -Path $extracted.FullName -Force
+              # 移动到目标目录
+              Move-Item -Path $extracted.FullName -Destination $openblasDir -Force
+            } else {
+              # 如果没有找到，尝试其他模式
+              $extracted = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "*OpenBLAS*" } | Select-Object -First 1
+              if ($extracted) {
+                Move-Item -Path $extracted.FullName -Destination $openblasDir -Force
+              } else {
+                # 如果还是没有，直接使用 tempDir 的内容
+                Move-Item -Path "$tempDir\*" -Destination $openblasDir -Force
+              }
             }
-            Remove-Item -Path "$openblasDir\openblas.zip" -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
           }
           
+          # 查找库文件（在 OpenBLAS 目录下递归查找）
           $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | 
-            Where-Object { $_.Name -match "openblas\.lib$" } | Select-Object -First 1
+            Where-Object { $_.Name -match "openblas\.lib$" -or $_.Name -match "libopenblas\.lib$" } | Select-Object -First 1
+          if (-not $libFile) {
+            $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | Select-Object -First 1
+          }
           
-          @(
-            "OpenBLAS_DIR=$openblasDir",
-            "BLAS_LIBRARIES=$($libFile.FullName)",
-            "BLAS_INCLUDE_DIRS=$openblasDir\include"
-          ) | ForEach-Object { Write-Host $_ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          if (-not $libFile) {
+            Write-Host "ERROR: OpenBLAS library file not found!"
+            Write-Host "Directory structure:"
+            Get-ChildItem -Path $openblasDir -Recurse | Select-Object FullName | Format-Table
+            exit 1
+          }
+          
+          # 查找 include 目录
+          $includeDir = Get-ChildItem -Path $openblasDir -Recurse -Directory -Filter "include" | Select-Object -First 1
+          if (-not $includeDir) {
+            $includeDir = Join-Path $openblasDir "include"
+          } else {
+            $includeDir = $includeDir.FullName
+          }
+          
+          Write-Host "Found OpenBLAS library: $($libFile.FullName)"
+          Write-Host "OpenBLAS directory: $openblasDir"
+          Write-Host "Include directory: $includeDir"
+          
+          # 设置环境变量
+          "OpenBLAS_DIR=$openblasDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "BLAS_LIBRARIES=$($libFile.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "BLAS_INCLUDE_DIRS=$includeDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # 4️⃣ Build whisper.cpp
       - name: Build whisper.cpp
@@ -91,13 +125,27 @@ jobs:
             cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_BLAS=ON $METAL
             cmake --build . --config Release -j$(sysctl -n hw.ncpu)
           else
+            # Windows: 使用 OpenBLAS
+            echo "BLAS_LIBRARIES: $BLAS_LIBRARIES"
+            echo "BLAS_INCLUDE_DIRS: $BLAS_INCLUDE_DIRS"
+            
             cmakeArgs=(
               -G "Visual Studio 17 2022" -A x64
               -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
               -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLA_VENDOR=OpenBLAS
             )
-            [[ -n "$BLAS_LIBRARIES" ]] && cmakeArgs+=(-DBLAS_LIBRARIES="$BLAS_LIBRARIES")
-            [[ -n "$BLAS_INCLUDE_DIRS" ]] && cmakeArgs+=(-DBLAS_INCLUDE_DIRS="$BLAS_INCLUDE_DIRS")
+            
+            if [[ -n "$BLAS_LIBRARIES" ]]; then
+              cmakeArgs+=(-DBLAS_LIBRARIES="$BLAS_LIBRARIES")
+            fi
+            if [[ -n "$BLAS_INCLUDE_DIRS" ]]; then
+              cmakeArgs+=(-DBLAS_INCLUDE_DIRS="$BLAS_INCLUDE_DIRS")
+            fi
+            if [[ -n "$OpenBLAS_DIR" ]]; then
+              cmakeArgs+=(-DOpenBLAS_DIR="$OpenBLAS_DIR")
+            fi
+            
+            echo "CMake command: cmake .. ${cmakeArgs[*]}"
             cmake .. "${cmakeArgs[@]}"
             cmake --build . --config Release --parallel
           fi
