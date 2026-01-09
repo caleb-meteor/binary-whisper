@@ -19,8 +19,8 @@ jobs:
             arch: arm64
           - os: macos-15-intel
             arch: x86_64
-          - os: windows-latest
-            arch: x64
+          # - os: windows-latest
+          #   arch: x64
 
     steps:
       # 1️⃣ Checkout main repo
@@ -41,77 +41,82 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake zip openblas
-
-      - name: Install dependencies on Windows
-        if: runner.os == 'Windows'
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y zip -y
+          brew install cmake zip
       
-      - name: Install OpenBLAS on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Install OpenBLAS on macOS Intel
+        if: runner.os == 'macOS' && matrix.arch == 'x86_64'
         run: |
-          $openblasDir = "C:\openblas"
-          if (-not (Test-Path $openblasDir)) {
-            $release = Invoke-RestMethod "https://api.github.com/repos/OpenMathLib/OpenBLAS/releases/latest"
-            $version = ($release.tag_name) -replace '^v', ''
-            $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/$($release.tag_name)/OpenBLAS-$version-x64.zip"
-            
-            $tempDir = "C:\openblas_temp"
-            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-            Write-Host "Downloading OpenBLAS $version from $url"
-            Invoke-WebRequest -Uri $url -OutFile "$tempDir\openblas.zip"
-            Expand-Archive -Path "$tempDir\openblas.zip" -DestinationPath $tempDir -Force
-            
-            # 查找解压后的 OpenBLAS-{version}-x64 目录
-            $extracted = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "OpenBLAS-*-x64" } | Select-Object -First 1
-            if ($extracted) {
-              # 移动到目标目录
-              Move-Item -Path $extracted.FullName -Destination $openblasDir -Force
-            } else {
-              # 如果没有找到，尝试其他模式
-              $extracted = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "*OpenBLAS*" } | Select-Object -First 1
-              if ($extracted) {
-                Move-Item -Path $extracted.FullName -Destination $openblasDir -Force
-              } else {
-                # 如果还是没有，直接使用 tempDir 的内容
-                Move-Item -Path "$tempDir\*" -Destination $openblasDir -Force
-              }
-            }
-            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          
-          # 查找库文件（在 OpenBLAS 目录下递归查找）
-          $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | 
-            Where-Object { $_.Name -match "openblas\.lib$" -or $_.Name -match "libopenblas\.lib$" } | Select-Object -First 1
-          if (-not $libFile) {
-            $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | Select-Object -First 1
-          }
-          
-          if (-not $libFile) {
-            Write-Host "ERROR: OpenBLAS library file not found!"
-            Write-Host "Directory structure:"
-            Get-ChildItem -Path $openblasDir -Recurse | Select-Object FullName | Format-Table
-            exit 1
-          }
-          
-          # 查找 include 目录
-          $includeDir = Get-ChildItem -Path $openblasDir -Recurse -Directory -Filter "include" | Select-Object -First 1
-          if (-not $includeDir) {
-            $includeDir = Join-Path $openblasDir "include"
-          } else {
-            $includeDir = $includeDir.FullName
-          }
-          
-          Write-Host "Found OpenBLAS library: $($libFile.FullName)"
-          Write-Host "OpenBLAS directory: $openblasDir"
-          Write-Host "Include directory: $includeDir"
-          
-          # 设置环境变量
-          "OpenBLAS_DIR=$openblasDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "BLAS_LIBRARIES=$($libFile.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "BLAS_INCLUDE_DIRS=$includeDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          brew install openblas
+
+      # - name: Install dependencies on Windows
+      #   if: runner.os == 'Windows'
+      #   run: |
+      #     choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y zip -y
+      # 
+      # - name: Install OpenBLAS on Windows
+      #   if: runner.os == 'Windows'
+      #   shell: pwsh
+      #   run: |
+      #     $openblasDir = "C:\openblas"
+      #     if (-not (Test-Path $openblasDir)) {
+      #       $release = Invoke-RestMethod "https://api.github.com/repos/OpenMathLib/OpenBLAS/releases/latest"
+      #       $version = ($release.tag_name) -replace '^v', ''
+      #       $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/$($release.tag_name)/OpenBLAS-$version-x64.zip"
+      #       
+      #       $tempDir = "C:\openblas_temp"
+      #       New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+      #       Write-Host "Downloading OpenBLAS $version from $url"
+      #       Invoke-WebRequest -Uri $url -OutFile "$tempDir\openblas.zip"
+      #       Expand-Archive -Path "$tempDir\openblas.zip" -DestinationPath $tempDir -Force
+      #       
+      #       # 查找解压后的 OpenBLAS-{version}-x64 目录
+      #       $extracted = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "OpenBLAS-*-x64" } | Select-Object -First 1
+      #       if ($extracted) {
+      #         # 移动到目标目录
+      #         Move-Item -Path $extracted.FullName -Destination $openblasDir -Force
+      #       } else {
+      #         # 如果没有找到，尝试其他模式
+      #         $extracted = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "*OpenBLAS*" } | Select-Object -First 1
+      #         if ($extracted) {
+      #           Move-Item -Path $extracted.FullName -Destination $openblasDir -Force
+      #         } else {
+      #           # 如果还是没有，直接使用 tempDir 的内容
+      #           Move-Item -Path "$tempDir\*" -Destination $openblasDir -Force
+      #         }
+      #       }
+      #       Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+      #     }
+      #     
+      #     # 查找库文件（在 OpenBLAS 目录下递归查找）
+      #     $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | 
+      #       Where-Object { $_.Name -match "openblas\.lib$" -or $_.Name -match "libopenblas\.lib$" } | Select-Object -First 1
+      #     if (-not $libFile) {
+      #       $libFile = Get-ChildItem -Path $openblasDir -Recurse -Filter "*.lib" | Select-Object -First 1
+      #     }
+      #     
+      #     if (-not $libFile) {
+      #       Write-Host "ERROR: OpenBLAS library file not found!"
+      #       Write-Host "Directory structure:"
+      #       Get-ChildItem -Path $openblasDir -Recurse | Select-Object FullName | Format-Table
+      #       exit 1
+      #     }
+      #     
+      #     # 查找 include 目录
+      #     $includeDir = Get-ChildItem -Path $openblasDir -Recurse -Directory -Filter "include" | Select-Object -First 1
+      #     if (-not $includeDir) {
+      #       $includeDir = Join-Path $openblasDir "include"
+      #     } else {
+      #       $includeDir = $includeDir.FullName
+      #     }
+      #     
+      #     Write-Host "Found OpenBLAS library: $($libFile.FullName)"
+      #     Write-Host "OpenBLAS directory: $openblasDir"
+      #     Write-Host "Include directory: $includeDir"
+      #     
+      #     # 设置环境变量
+      #     "OpenBLAS_DIR=$openblasDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      #     "BLAS_LIBRARIES=$($libFile.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      #     "BLAS_INCLUDE_DIRS=$includeDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # 4️⃣ Build whisper.cpp
       - name: Build whisper.cpp
@@ -122,32 +127,34 @@ jobs:
           
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             [[ "${{ matrix.arch }}" == "arm64" ]] && METAL="-DGGML_METAL=ON" || METAL=""
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_BLAS=ON $METAL
+            # 仅在 intel (x86_64) 上开启 BLAS
+            [[ "${{ matrix.arch }}" == "x86_64" ]] && BLAS="-DGGML_BLAS=ON" || BLAS=""
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF $METAL $BLAS
             cmake --build . --config Release -j$(sysctl -n hw.ncpu)
-          else
-            # Windows: 使用 OpenBLAS
-            echo "BLAS_LIBRARIES: $BLAS_LIBRARIES"
-            echo "BLAS_INCLUDE_DIRS: $BLAS_INCLUDE_DIRS"
-            
-            cmakeArgs=(
-              -G "Visual Studio 17 2022" -A x64
-              -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
-              -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLA_VENDOR=OpenBLAS
-            )
-            
-            if [[ -n "$BLAS_LIBRARIES" ]]; then
-              cmakeArgs+=(-DBLAS_LIBRARIES="$BLAS_LIBRARIES")
-            fi
-            if [[ -n "$BLAS_INCLUDE_DIRS" ]]; then
-              cmakeArgs+=(-DBLAS_INCLUDE_DIRS="$BLAS_INCLUDE_DIRS")
-            fi
-            if [[ -n "$OpenBLAS_DIR" ]]; then
-              cmakeArgs+=(-DOpenBLAS_DIR="$OpenBLAS_DIR")
-            fi
-            
-            echo "CMake command: cmake .. ${cmakeArgs[*]}"
-            cmake .. "${cmakeArgs[@]}"
-            cmake --build . --config Release --parallel
+          # else
+          #   # Windows: 使用 OpenBLAS
+          #   echo "BLAS_LIBRARIES: $BLAS_LIBRARIES"
+          #   echo "BLAS_INCLUDE_DIRS: $BLAS_INCLUDE_DIRS"
+          #   
+          #   cmakeArgs=(
+          #     -G "Visual Studio 17 2022" -A x64
+          #     -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+          #     -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLA_VENDOR=OpenBLAS
+          #   )
+          #   
+          #   if [[ -n "$BLAS_LIBRARIES" ]]; then
+          #     cmakeArgs+=(-DBLAS_LIBRARIES="$BLAS_LIBRARIES")
+          #   fi
+          #   if [[ -n "$BLAS_INCLUDE_DIRS" ]]; then
+          #     cmakeArgs+=(-DBLAS_INCLUDE_DIRS="$BLAS_INCLUDE_DIRS")
+          #   fi
+          #   if [[ -n "$OpenBLAS_DIR" ]]; then
+          #     cmakeArgs+=(-DOpenBLAS_DIR="$OpenBLAS_DIR")
+          #   fi
+          #   
+          #   echo "CMake command: cmake .. ${cmakeArgs[*]}"
+          #   cmake .. "${cmakeArgs[@]}"
+          #   cmake --build . --config Release --parallel
           fi
 
       # 5️⃣ Package artifacts
@@ -159,10 +166,10 @@ jobs:
             zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
               -x "*.o" "*.cmake" "CMakeFiles/*" "Makefile" "cmake_install.cmake" \
               -x "*.log" "*.tmp" "*.cache" "*.swp" "*~"
-          else
-            zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
-              -x "*.obj" "*.pdb" "CMakeFiles/*" "*.cmake" "*.vcxproj*" "*.sln" \
-              -x "*.log" "*.tmp" "*.cache" "*.swp" "*~" "*.user" "*.suo"
+          # else
+          #   zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
+          #     -x "*.obj" "*.pdb" "CMakeFiles/*" "*.cmake" "*.vcxproj*" "*.sln" \
+          #     -x "*.log" "*.tmp" "*.cache" "*.swp" "*~" "*.user" "*.suo"
           fi
           ls -lh whisper-*.zip
 
