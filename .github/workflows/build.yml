@@ -162,14 +162,17 @@ jobs:
         shell: bash
         run: |
           cd whisper.cpp/build
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
-              -x "*.o" "*.cmake" "CMakeFiles/*" "Makefile" "cmake_install.cmake" \
-              -x "*.log" "*.tmp" "*.cache" "*.swp" "*~"
-          # else
-          #   zip -r whisper-${{ runner.os }}-${{ matrix.arch }}.zip . \
-          #     -x "*.obj" "*.pdb" "CMakeFiles/*" "*.cmake" "*.vcxproj*" "*.sln" \
-          #     -x "*.log" "*.tmp" "*.cache" "*.swp" "*~" "*.user" "*.suo"
+          BUILD_DIR=$(pwd)
+          # 递归查找 bin 目录
+          BIN_DIR=$(find . -type d -name "bin" | head -n 1)
+          if [[ -n "$BIN_DIR" && -d "$BIN_DIR" ]]; then
+            echo "Found bin directory: $BIN_DIR"
+            ZIP_FILE="$BUILD_DIR/whisper-${{ runner.os }}-${{ matrix.arch }}.zip"
+            # 在 build 目录下创建 zip，内容来自 bin 目录
+            (cd "$BIN_DIR" && zip -r "$ZIP_FILE" .)
+          else
+            echo "Warning: bin directory not found"
+            exit 1
           fi
           ls -lh whisper-*.zip
 
